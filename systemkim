@@ -1,0 +1,524 @@
+package main;
+
+import config.config;
+import models.*;
+import java.util.*;
+import utils.PasswordUtil; // password hasher
+
+public class main {
+
+    public static void main(String[] args) {
+        config db = new config();
+        db.connectDB();
+        Scanner sc = new Scanner(System.in);
+        char cont;
+
+        do {
+            System.out.println("\n===== MAIN MENU =====");
+            System.out.println("1. Register User");
+            System.out.println("2. Login");
+            System.out.println("0. Exit");
+            System.out.print("Enter choice: ");
+
+            while (!sc.hasNextInt()) {
+                System.out.print("Please enter a valid number: ");
+                sc.next();
+            }
+            int choice = sc.nextInt();
+            sc.nextLine(); // consume leftover newline
+
+            switch (choice) {
+                case 1: {
+                    String name, email, pass, type;
+
+                    do {
+                        System.out.print("Enter name: ");
+                        name = sc.nextLine().trim();
+                    } while (name.isEmpty());
+
+                    do {
+                        System.out.print("Enter email: ");
+                        email = sc.nextLine().trim();
+                    } while (email.isEmpty());
+
+                    do {
+                        System.out.print("Enter password: ");
+                        pass = sc.nextLine().trim();
+                    } while (pass.isEmpty());
+
+                    do {
+                        System.out.print("Enter type (Admin/Teacher/Student): ");
+                        type = sc.nextLine().trim();
+                    } while (type.isEmpty());
+
+                    String hashedPass = PasswordUtil.hashPassword(pass);
+                    User.registerUser(db, name, email, hashedPass, type);
+                    break;
+                }
+
+                case 2: {
+                    String em, pw;
+
+                    do {
+                        System.out.print("Enter email: ");
+                        em = sc.nextLine().trim();
+                    } while (em.isEmpty());
+
+                    do {
+                        System.out.print("Enter password: ");
+                        pw = sc.nextLine().trim();
+                    } while (pw.isEmpty());
+
+                    String hashedPw = PasswordUtil.hashPassword(pw);
+                    User.loginUser(db, sc, em, hashedPw);
+                    break;
+                }
+
+                case 0: {
+                    System.out.println("Exiting program... Goodbye!");
+                    System.exit(0);
+                    break;
+                }
+
+                default:
+                    System.out.println("Invalid choice!");
+            }
+
+            System.out.print("\nDo you want to continue? (Y/N): ");
+            cont = sc.next().charAt(0);
+            sc.nextLine();
+
+        } while (cont == 'Y' || cont == 'y');
+
+        System.out.println("Program Ended. Goodbye!");
+    }
+}
+========================
+package models;
+
+import config.config;
+import java.util.*;
+
+public class Grade {
+
+    public static void viewGrades(config db) {
+        String query = "SELECT g_id, s_name, sbj_desc, final, " +
+                       "CASE WHEN final >= 75 THEN 'Pass' ELSE 'Fail' END AS remarks " +
+                       "FROM grades " +
+                       "JOIN students ON grades.s_id = students.s_id " +
+                       "JOIN subjects ON grades.sbj_id = subjects.sbj_id";
+        String[] headers = {"ID", "Student", "Subject", "Grade", "Remarks"};
+        String[] cols = {"g_id", "s_name", "sbj_desc", "final", "remarks"};
+        db.viewRecords(query, headers, cols);
+    }
+
+    public static void viewStudentGrades(config db, String email) {
+        String gradeQuery = "SELECT sbj_desc AS Subject, final AS Grade, " +
+                            "CASE WHEN final >= 75 THEN 'Pass' ELSE 'Fail' END AS Remarks " +
+                            "FROM grades " +
+                            "JOIN students ON grades.s_id = students.s_id " +
+                            "JOIN subjects ON grades.sbj_id = subjects.sbj_id " +
+                            "JOIN users ON students.s_name = users.u_name " +
+                            "WHERE users.u_email = ?";
+        List<Map<String, Object>> gradeResult = db.fetchRecords(gradeQuery, email);
+
+        if (gradeResult.isEmpty()) {
+            System.out.println("No grades found.");
+        } else {
+            System.out.println("\n--- My Grades ---");
+            for (Map<String, Object> row : gradeResult) {
+                System.out.println("Subject: " + row.get("Subject"));
+                System.out.println("Grade  : " + row.get("Grade"));
+                System.out.println("Remarks: " + row.get("Remarks"));
+                System.out.println("----------------------");
+            }
+        }
+    }
+
+    public static void manageGrades(config db, Scanner sc) {
+        int choice;
+        do {
+            System.out.println("\n--- MANAGE GRADES ---");
+            System.out.println("1. Add Grade");
+            System.out.println("2. View Grades");
+            System.out.println("3. Update Grade");
+            System.out.println("4. Delete Grade");
+            System.out.println("0. Back");
+            System.out.print("Choice: ");
+            choice = sc.nextInt();
+
+            switch (choice) {
+                case 1:
+                    System.out.println("\n=== Add Grades ===");
+                    List<Map<String, Object>> students = db.fetchRecords("SELECT s_id, s_name FROM students");
+                    if (students.isEmpty()) {
+                        System.out.println("No students found!");
+                        break;
+                    }
+
+                    System.out.println("Available Students:");
+                    for (Map<String, Object> s : students) {
+                        System.out.println(s.get("s_id") + " - " + s.get("s_name"));
+                    }
+
+                    System.out.print("\nEnter Student ID: ");
+                    int sId = sc.nextInt();
+                    sc.nextLine();
+
+                    System.out.print("Assign all default subjects (Math, Science, English, Programming)? (Y/N): ");
+                    char assignAll = sc.next().toUpperCase().charAt(0);
+
+                    if (assignAll == 'Y') {
+                        // Default subjects (use names or IDs)
+                        String[] defaultSubjects = {"Math", "Science", "English", "Programming"};
+
+                        for (String subj : defaultSubjects) {
+                            // Check if subject exists
+                            String checkQuery = "SELECT sbj_id FROM subjects WHERE sbj_desc LIKE ?";
+                            List<Map<String, Object>> sbj = db.fetchRecords(checkQuery, "%" + subj + "%");
+
+                            if (sbj.isEmpty()) {
+                                System.out.println("⚠️ Subject not found in database: " + subj);
+                                continue;
+                            }
+
+                            int sbjId = ((Number) sbj.get(0).get("sbj_id")).intValue();
+                            System.out.print("Enter final grade for " + subj + ": ");
+                            double grade = sc.nextDouble();
+
+                            db.addRecord("INSERT INTO grades (s_id, sbj_id, final) VALUES (?, ?, ?)", sId, sbjId, grade);
+                            System.out.println("Record added successfully for subject: " + subj);
+                        }
+
+                    } else {
+                        // Manual subject selection
+                        List<Map<String, Object>> subjects = db.fetchRecords("SELECT sbj_id, sbj_desc FROM subjects");
+                        if (subjects.isEmpty()) {
+                            System.out.println("No subjects found!");
+                            break;
+                        }
+
+                        System.out.println("\nAvailable Subjects:");
+                        for (Map<String, Object> subj : subjects) {
+                            System.out.println(subj.get("sbj_id") + " - " + subj.get("sbj_desc"));
+                        }
+
+                        char addMore;
+                        do {
+                            System.out.print("\nEnter Subject ID: ");
+                            int sbjId = sc.nextInt();
+                            System.out.print("Enter Final Grade: ");
+                            double grade = sc.nextDouble();
+
+                            db.addRecord("INSERT INTO grades (s_id, sbj_id, final) VALUES (?, ?, ?)", sId, sbjId, grade);
+                            System.out.println("Record added successfully!");
+
+                            System.out.print("Add another subject? (Y/N): ");
+                            addMore = sc.next().toUpperCase().charAt(0);
+                        } while (addMore == 'Y');
+                    }
+                    break;
+
+                case 2:
+                    viewGrades(db);
+                    break;
+
+                case 3:
+                    System.out.print("Enter Grade ID to update: ");
+                    int gid = sc.nextInt();
+                    System.out.print("Enter new grade: ");
+                    double newGrade = sc.nextDouble();
+                    db.updateRecord("UPDATE grades SET final = ? WHERE g_id = ?", newGrade, gid);
+                    break;
+
+                case 4:
+                    System.out.print("Enter Grade ID to delete: ");
+                    int delGid = sc.nextInt();
+                    db.deleteRecord("DELETE FROM grades WHERE g_id = ?", delGid);
+                    break;
+
+                case 0:
+                    return;
+
+                default:
+                    System.out.println("Invalid choice!");
+            }
+        } while (choice != 0);
+    }
+}
+==================
+package models;
+
+import config.config;
+import java.util.*;
+
+public class Student {
+
+    public static void viewStudents(config db) {
+        String query = "SELECT s_id, s_name, s_age, s_gender FROM students";
+        String[] headers = {"ID", "Name", "Age", "Gender"};
+        String[] cols = {"s_id", "s_name", "s_age", "s_gender"};
+        db.viewRecords(query, headers, cols);
+    }
+
+    public static void manageStudents(config db, Scanner sc) {
+        int choice;
+        do {
+            System.out.println("\n--- MANAGE STUDENTS ---");
+            System.out.println("1. Add Student");
+            System.out.println("2. View Students");
+            System.out.println("3. Update Student");
+            System.out.println("4. Delete Student");
+            System.out.println("0. Back");
+            System.out.print("Choice: ");
+            choice = sc.nextInt();
+
+            switch (choice) {
+                case 1:
+                    sc.nextLine();
+                    System.out.print("Enter student name: ");
+                    String sname = sc.nextLine();
+                    System.out.print("Enter age: ");
+                    int age = sc.nextInt();
+                    System.out.print("Enter gender: ");
+                    sc.nextLine();
+                    String gen = sc.nextLine();
+                    db.addRecord("INSERT INTO students(s_name, s_age, s_gender) VALUES (?, ?, ?)", sname, age, gen);
+                    break;
+
+                case 2: viewStudents(db); break;
+
+                case 3:
+                    System.out.print("Enter Student ID to update: ");
+                    int sid = sc.nextInt(); sc.nextLine();
+                    System.out.print("New name: ");
+                    String newName = sc.nextLine();
+                    System.out.print("New age: ");
+                    int newAge = sc.nextInt();
+                    System.out.print("New gender: ");
+                    sc.nextLine();
+                    String newGender = sc.nextLine();
+                    db.updateRecord("UPDATE students SET s_name = ?, s_age = ?, s_gender = ? WHERE s_id = ?", newName, newAge, newGender, sid);
+                    break;
+
+                case 4:
+                    System.out.print("Enter Student ID to delete: ");
+                    int delId = sc.nextInt();
+                    db.deleteRecord("DELETE FROM students WHERE s_id = ?", delId);
+                    break;
+
+                case 0: return;
+                default: System.out.println("Invalid choice!");
+            }
+        } while (choice != 0);
+    }
+}
+=======================
+package models;
+
+import config.config;
+import java.util.*;
+
+public class Subject {
+
+    public static void viewSubjects(config db) {
+        String query = "SELECT * FROM subjects";
+        String[] headers = {"ID", "Code", "Description"};
+        String[] cols = {"sbj_id", "sbj_code", "sbj_desc"};
+        db.viewRecords(query, headers, cols);
+    }
+
+    public static void manageSubjects(config db, Scanner sc) {
+        int choice;
+        do {
+            System.out.println("\n--- MANAGE SUBJECTS ---");
+            System.out.println("1. Add Subject");
+            System.out.println("2. View Subjects");
+            System.out.println("3. Update Subject");
+            System.out.println("4. Delete Subject");
+            System.out.println("0. Back");
+            System.out.print("Choice: ");
+            choice = sc.nextInt();
+
+            switch (choice) {
+                case 1:
+                    sc.nextLine();
+                    System.out.print("Enter subject code: ");
+                    String code = sc.nextLine();
+                    System.out.print("Enter description: ");
+                    String desc = sc.nextLine();
+                    db.addRecord("INSERT INTO subjects(sbj_code, sbj_desc) VALUES (?, ?)", code, desc);
+                    break;
+
+                case 2: viewSubjects(db); break;
+
+                case 3:
+                    System.out.print("Enter Subject ID to update: ");
+                    int sid = sc.nextInt(); sc.nextLine();
+                    System.out.print("New code: ");
+                    String ncode = sc.nextLine();
+                    System.out.print("New description: ");
+                    String ndesc = sc.nextLine();
+                    db.updateRecord("UPDATE subjects SET sbj_code = ?, sbj_desc = ? WHERE sbj_id = ?", ncode, ndesc, sid);
+                    break;
+
+                case 4:
+                    System.out.print("Enter Subject ID to delete: ");
+                    int did = sc.nextInt();
+                    db.deleteRecord("DELETE FROM subjects WHERE sbj_id = ?", did);
+                    break;
+
+                case 0: return;
+                default: System.out.println("Invalid choice!");
+            }
+        } while (choice != 0);
+    }
+}
+==================
+package models;
+
+import config.config;
+import java.util.*;
+
+public class User {
+
+    public static void registerUser(config db, String name, String email, String pass, String type) {
+        String sql = "INSERT INTO users(u_name, u_email, u_type, u_status, u_pass) VALUES (?, ?, ?, ?, ?)";
+        db.addRecord(sql, name, email, type, "Pending", pass);
+        System.out.println("User registered successfully!");
+    }
+
+    public static void loginUser(config db, Scanner sc, String email, String pw) {
+        String qry = "SELECT * FROM users WHERE u_email = ? AND u_pass = ?";
+        List<Map<String, Object>> result = db.fetchRecords(qry, email, pw);
+
+        if (result.isEmpty()) {
+            System.out.println("Invalid credentials!");
+        } else {
+            Map<String, Object> user = result.get(0);
+            String role = (String) user.get("u_type");
+            System.out.println("Welcome, " + user.get("u_name") + " (" + role + ")");
+
+            if (role.equalsIgnoreCase("Admin")) adminMenu(db, sc);
+            else if (role.equalsIgnoreCase("Teacher")) teacherMenu(db, sc);
+            else if (role.equalsIgnoreCase("Student")) studentMenu(db, sc, email);
+        }
+    }
+
+    // ========== MENUS ==========
+
+    public static void adminMenu(config db, Scanner sc) {
+        int choice;
+        do {
+            System.out.println("\n--- ADMIN MENU ---");
+            System.out.println("1. Manage Students");
+            System.out.println("2. Manage Subjects");
+            System.out.println("3. Manage Grades");
+            System.out.println("0. Logout");
+            System.out.print("Choice: ");
+
+            choice = getValidInt(sc);
+
+            switch (choice) {
+                case 1: Student.manageStudents(db, sc); break;
+                case 2: Subject.manageSubjects(db, sc); break;
+                case 3: Grade.manageGrades(db, sc); break;
+                case 0: return;
+                default: System.out.println("Invalid choice!");
+            }
+        } while (choice != 0);
+    }
+
+    public static void teacherMenu(config db, Scanner sc) {
+        int choice;
+        do {
+            System.out.println("\n--- TEACHER MENU ---");
+            System.out.println("1. Add Student");
+            System.out.println("2. View Students");
+            System.out.println("3. Add Grade");
+            System.out.println("4. View Grades");
+            System.out.println("0. Logout");
+            System.out.print("Choice: ");
+
+            choice = getValidInt(sc);
+
+            switch (choice) {
+                case 1: Student.manageStudents(db, sc); break;
+                case 2: Student.viewStudents(db); break;
+                case 3: Grade.manageGrades(db, sc); break;
+                case 4: Grade.viewGrades(db); break;
+                case 0: return;
+                default: System.out.println("Invalid choice!");
+            }
+        } while (choice != 0);
+    }
+
+    public static void studentMenu(config db, Scanner sc, String email) {
+        int choice;
+        do {
+            System.out.println("\n--- STUDENT MENU ---");
+            System.out.println("1. View My Info");
+            System.out.println("2. View My Grades");
+            System.out.println("0. Logout");
+            System.out.print("Choice: ");
+
+            choice = getValidInt(sc);
+
+            switch (choice) {
+                case 1: viewMyInfo(db, email); break;
+                case 2: Grade.viewStudentGrades(db, email); break;
+                case 0: return;
+                default: System.out.println("Invalid choice!");
+            }
+        } while (choice != 0);
+    }
+
+    // ========== Helper Methods ==========
+
+    private static int getValidInt(Scanner sc) {
+        while (!sc.hasNextInt()) {
+            System.out.print("Please enter a valid number: ");
+            sc.next();
+        }
+        int val = sc.nextInt();
+        sc.nextLine();
+        return val;
+    }
+
+    private static void viewMyInfo(config db, String email) {
+        String infoQuery = "SELECT u_name, u_email, u_type FROM users WHERE u_email = ?";
+        List<Map<String, Object>> infoResult = db.fetchRecords(infoQuery, email);
+
+        if (infoResult.isEmpty()) {
+            System.out.println("No information found.");
+        } else {
+            Map<String, Object> userInfo = infoResult.get(0);
+            System.out.println("\n--- My Information ---");
+            System.out.println("Name   : " + userInfo.get("u_name"));
+            System.out.println("Email  : " + userInfo.get("u_email"));
+            System.out.println("Type   : " + userInfo.get("u_type"));
+        }
+    }
+}
+=======================
+package utils;
+
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+
+public class PasswordUtil {
+
+    public static String hashPassword(String password) {
+        try {
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            byte[] hashBytes = md.digest(password.getBytes());
+            StringBuilder sb = new StringBuilder();
+            for (byte b : hashBytes) {
+                sb.append(String.format("%02x", b)); // convert bytes to hex
+            }
+            return sb.toString();
+        } catch (NoSuchAlgorithmException e) {
+            throw new RuntimeException("Error hashing password", e);
+        }
+    }
+}
